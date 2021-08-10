@@ -1428,7 +1428,12 @@ static int of_i2s_resetid_get(struct device_node *node,
 static int rockchip_i2s_tdm_dai_prepare(struct platform_device *pdev,
 					struct snd_soc_dai_driver **soc_dai)
 {
-	struct snd_soc_dai_driver rockchip_i2s_tdm_dai = {
+	*soc_dai = devm_kzalloc(&pdev->dev, sizeof(**soc_dai), GFP_KERNEL);
+
+	if (!(*soc_dai))
+		return -ENOMEM;
+
+	**soc_dai = (struct snd_soc_dai_driver) {
 		.probe = rockchip_i2s_tdm_dai_probe,
 		.playback = {
 			.stream_name = "Playback",
@@ -1454,11 +1459,6 @@ static int rockchip_i2s_tdm_dai_prepare(struct platform_device *pdev,
 		},
 		.ops = &rockchip_i2s_tdm_dai_ops,
 	};
-
-	*soc_dai = devm_kmemdup(&pdev->dev, &rockchip_i2s_tdm_dai,
-				sizeof(rockchip_i2s_tdm_dai), GFP_KERNEL);
-	if (!(*soc_dai))
-		return -ENOMEM;
 
 	return 0;
 }
