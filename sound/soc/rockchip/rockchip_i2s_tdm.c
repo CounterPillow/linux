@@ -23,6 +23,7 @@
 #include <linux/spinlock.h>
 #include <sound/pcm_params.h>
 #include <sound/dmaengine_pcm.h>
+#include <dt-bindings/sound/rockchip,i2s-tdm.h>
 
 #include "rockchip_i2s_tdm.h"
 
@@ -1243,19 +1244,14 @@ static int common_soc_init(struct device *dev, u32 addr)
 	u32 reg = 0, val = 0, trcm = i2s_tdm->clk_trcm;
 	int i;
 
-	switch (trcm) {
-	case I2S_CKR_TRCM_TXONLY:
-	case I2S_CKR_TRCM_RXONLY:
-		break;
-	default:
+	if(trcm == RK_TRCM_TXRX)
 		return 0;
-	}
 
 	for (i = 0; i < i2s_tdm->soc_data->config_count; i++) {
 		if (addr != configs[i].addr)
 			continue;
 		reg = configs[i].reg;
-		if (trcm == I2S_CKR_TRCM_TXONLY)
+		if (trcm == RK_TRCM_TX)
 			val = configs[i].txonly;
 		else
 			val = configs[i].rxonly;
@@ -1554,13 +1550,20 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 			return -EINVAL;
 	}
 
-	i2s_tdm->clk_trcm = I2S_CKR_TRCM_TXRX;
-	if (!of_property_read_u32(node, "rockchip,clk-trcm", &val)) {
-		if (val >= 0 && val <= 2) {
-			i2s_tdm->clk_trcm = val << I2S_CKR_TRCM_SHIFT;
-			if (i2s_tdm->clk_trcm)
-				i2s_tdm_dai.symmetric_rate = 1;
+	if (!of_property_read_u32(node, "rockchip,trcm-sync", &val)) {
+		switch (val) {
+		case RK_TRCM_TX:
+		case RK_TRCM_RX:
+			i2s_tdm_dai.symmetric_rate = 1;
+			fallthrough;
+		case RK_TRCM_TXRX:
+			i2s_tdm->clk_trcm = val;
+			break;
+		default:
+			return -EINVAL;
 		}
+	} else {
+		return -ENOENT;
 	}
 
 	i2s_tdm->tdm_fsync_half_frame =
@@ -1575,7 +1578,7 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 	if (IS_ERR(i2s_tdm->grf))
 		return PTR_ERR(i2s_tdm->grf);
 
-	if (i2s_tdm->clk_trcm) {
+	if (i2s_tdm->clk_trcm != RK_TRCM_TXRX) {
 		cru_node = of_parse_phandle(node, "rockchip,cru", 0);
 		i2s_tdm->cru_base = of_iomap(cru_node, 0);
 		if (!i2s_tdm->cru_base)
@@ -1687,8 +1690,8 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 			   I2S_DMACR_TDL(16));
 	regmap_update_bits(i2s_tdm->regmap, I2S_DMACR, I2S_DMACR_RDL_MASK,
 			   I2S_DMACR_RDL(16));
-	regmap_update_bits(i2s_tdm->regmap, I2S_CKR,
-			   I2S_CKR_TRCM_MASK, i2s_tdm->clk_trcm);
+	regmap_update_bits(i2s_tdm->regmap, I2S_CKR, I2S_CKR_TRCM_MASK,
+			   i2s_tdm->clk_trcm << I2S_CKR_TRCM_SHIFT);
 
 	if (i2s_tdm->soc_data && i2s_tdm->soc_data->init)
 		i2s_tdm->soc_data->init(&pdev->dev, res->start);

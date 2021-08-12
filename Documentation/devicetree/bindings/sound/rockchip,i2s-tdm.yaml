@@ -88,14 +88,21 @@ properties:
       Enable mclk source calibration.
     type: boolean
 
-  rockchip,clk-trcm:
+  rockchip,trcm-sync:
     $ref: /schemas/types.yaml#/definitions/uint32
-    description: |
-      Specify tx and rx lrck/bclk common use.
-      - 0: Use both tx and rx lrck/bclk.
-      - 1: Only tx_lrck/bclk is used.
-      - 2: Only rx_lrck/bclk is used.
-    enum: [0, 1, 2]
+    description:
+      Which lrck/bclk clocks each direction will sync to. You should use the
+      constants in <dt-bindings/sound/rockchip,i2s-tdm.h>
+    oneOf:
+      - const: 0
+        description:
+          RK_TRCM_TXRX. Use both the TX and the RX clock for TX and RX.
+      - const: 1
+        description:
+          RK_TRCM_TX. Use only the TX clock for TX and RX.
+      - const: 2
+        description:
+          RK_TRCM_RX. Use only the RX clock for TX and RX.
 
   "#sound-dai-cells":
     const: 0
@@ -153,6 +160,7 @@ required:
   - reset-names
   - rockchip,grf
   - "#sound-dai-cells"
+  - rockchip,trcm-sync
 
 allOf:
   - if:
@@ -173,6 +181,7 @@ examples:
     #include <dt-bindings/interrupt-controller/arm-gic.h>
     #include <dt-bindings/interrupt-controller/irq.h>
     #include <dt-bindings/pinctrl/rockchip.h>
+    #include <dt-bindings/sound/rockchip,i2s-tdm.h>
 
 
     foo {
@@ -189,6 +198,7 @@ examples:
             dma-names = "tx", "rx";
             resets = <&cru SRST_M_I2S1_8CH_TX>, <&cru SRST_M_I2S1_8CH_RX>;
             reset-names = "tx-m", "rx-m";
+            rockchip,trcm-sync = <RK_TRCM_TX>;
             rockchip,cru = <&cru>;
             rockchip,grf = <&grf>;
             #sound-dai-cells = <0>;

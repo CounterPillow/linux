@@ -4,6 +4,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/sound/rockchip,i2s-tdm.h>
 #include "rk3566.dtsi"
 
 / {
@@ -529,7 +530,7 @@
 
 &i2s1_8ch {
 	status = "okay";
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync = <RK_TRCM_TX>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2s1m0_sclktx
 		     &i2s1m0_lrcktx
