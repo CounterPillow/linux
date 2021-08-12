@@ -1,13 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* sound/soc/rockchip/rockchip_i2s_tdm.c
  *
  * ALSA SoC Audio Layer - Rockchip I2S/TDM Controller driver
  *
  * Copyright (c) 2018 Rockchip Electronics Co. Ltd.
  * Author: Sugar Zhang <sugar.zhang@rock-chips.com>
+ * Author: Nicolas Frattaroli <frattaroli.nicolas@gmail.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -89,7 +88,7 @@ struct rk_i2s_tdm_dev {
 	unsigned int mclk_root1_freq;
 	unsigned int mclk_root0_initial_freq;
 	unsigned int mclk_root1_initial_freq;
-	unsigned int bclk_fs;
+	unsigned int frame_width;
 	unsigned int clk_trcm;
 	unsigned int i2s_sdis[CH_GRP_MAX];
 	unsigned int i2s_sdos[CH_GRP_MAX];
@@ -913,7 +912,7 @@ static int rockchip_i2s_tdm_hw_params(struct snd_pcm_substream *substream,
 			return ret;
 
 		mclk_rate = clk_get_rate(mclk);
-		bclk_rate = i2s_tdm->bclk_fs * params_rate(params);
+		bclk_rate = i2s_tdm->frame_width * params_rate(params);
 		if (!bclk_rate) {
 			return -EINVAL;
 		}
@@ -1119,7 +1118,7 @@ static int rockchip_dai_tdm_slot(struct snd_soc_dai *dai,
 	unsigned int mask, val;
 
 	i2s_tdm->tdm_mode = true;
-	i2s_tdm->bclk_fs = slots * slot_width;
+	i2s_tdm->frame_width = slots * slot_width;
 	mask = TDM_SLOT_BIT_WIDTH_MSK | TDM_FRAME_WIDTH_MSK;
 	val = TDM_SLOT_BIT_WIDTH(slot_width) |
 	      TDM_FRAME_WIDTH(slots * slot_width);
@@ -1547,10 +1546,12 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 	spin_lock_init(&i2s_tdm->lock);
 	i2s_tdm->soc_data = (struct rk_i2s_soc_data *)of_id->data;
 
-	i2s_tdm->bclk_fs = 64;
-	if (!of_property_read_u32(node, "rockchip,bclk-fs", &val)) {
-		if ((val >= 32) && (val % 2 == 0))
-			i2s_tdm->bclk_fs = val;
+	i2s_tdm->frame_width = 64;
+	if (!of_property_read_u32(node, "rockchip,frame-width", &val)) {
+		if ((val >= 32) && (val % 2 == 0) && (val <= 512))
+			i2s_tdm->frame_width = val;
+		else
+			return -EINVAL;
 	}
 
 	i2s_tdm->clk_trcm = I2S_CKR_TRCM_TXRX;

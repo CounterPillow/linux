@@ -52,12 +52,14 @@ properties:
       - const: mclk_rx
       - const: hclk
 
-  rockchip,bclk-fs:
+  rockchip,frame-width:
     $ref: /schemas/types.yaml#/definitions/uint32
     default: 64
     minimum: 32
+    maximum: 512
     description:
-      Value for the bclk fs
+      Width of a frame, usually slot width multiplied by number of slots.
+      Must be even.
 
   resets:
     items:
