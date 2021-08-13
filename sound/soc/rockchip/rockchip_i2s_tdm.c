@@ -426,7 +426,7 @@ static int rockchip_i2s_tdm_set_fmt(struct snd_soc_dai *cpu_dai,
 				    unsigned int fmt)
 {
 	struct rk_i2s_tdm_dev *i2s_tdm = to_info(cpu_dai);
-	unsigned int mask = 0, val = 0, tdm_val = 0;
+	unsigned int mask = 0, val = 0, tdm_val = 0, txcr_val = 0, rxcr_val = 0;
 	int ret = 0;
 	bool is_tdm = i2s_tdm->tdm_mode;
 
@@ -477,53 +477,37 @@ static int rockchip_i2s_tdm_set_fmt(struct snd_soc_dai *cpu_dai,
 
 	regmap_update_bits(i2s_tdm->regmap, I2S_CKR, mask, val);
 
-	mask = I2S_TXCR_IBM_MASK | I2S_TXCR_TFS_MASK | I2S_TXCR_PBM_MASK;
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAIFMT_RIGHT_J:
-		val = I2S_TXCR_IBM_RSJM;
+		txcr_val = I2S_TXCR_IBM_RSJM;
+		rxcr_val = I2S_RXCR_IBM_RSJM;
 		break;
 	case SND_SOC_DAIFMT_LEFT_J:
-		val = I2S_TXCR_IBM_LSJM;
+		txcr_val = I2S_TXCR_IBM_LSJM;
+		rxcr_val = I2S_RXCR_IBM_LSJM;
 		break;
 	case SND_SOC_DAIFMT_I2S:
-		val = I2S_TXCR_IBM_NORMAL;
+		txcr_val = I2S_TXCR_IBM_NORMAL;
+		rxcr_val = I2S_RXCR_IBM_NORMAL;
 		break;
 	case SND_SOC_DAIFMT_DSP_A: /* PCM no delay mode */
-		val = I2S_TXCR_TFS_PCM;
+		txcr_val = I2S_TXCR_TFS_PCM;
+		rxcr_val = I2S_RXCR_TFS_PCM;
 		break;
 	case SND_SOC_DAIFMT_DSP_B: /* PCM delay 1 mode */
-		val = I2S_TXCR_TFS_PCM | I2S_TXCR_PBM_MODE(1);
+		txcr_val = I2S_TXCR_TFS_PCM | I2S_TXCR_PBM_MODE(1);
+		rxcr_val = I2S_RXCR_TFS_PCM | I2S_RXCR_PBM_MODE(1);
 		break;
 	default:
 		ret = -EINVAL;
 		goto err_pm_put;
 	}
 
-	regmap_update_bits(i2s_tdm->regmap, I2S_TXCR, mask, val);
+	mask = I2S_TXCR_IBM_MASK | I2S_TXCR_TFS_MASK | I2S_TXCR_PBM_MASK;
+	regmap_update_bits(i2s_tdm->regmap, I2S_TXCR, mask, txcr_val);
 
 	mask = I2S_RXCR_IBM_MASK | I2S_RXCR_TFS_MASK | I2S_RXCR_PBM_MASK;
-	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
-	case SND_SOC_DAIFMT_RIGHT_J:
-		val = I2S_RXCR_IBM_RSJM;
-		break;
-	case SND_SOC_DAIFMT_LEFT_J:
-		val = I2S_RXCR_IBM_LSJM;
-		break;
-	case SND_SOC_DAIFMT_I2S:
-		val = I2S_RXCR_IBM_NORMAL;
-		break;
-	case SND_SOC_DAIFMT_DSP_A: /* PCM no delay mode */
-		val = I2S_RXCR_TFS_PCM;
-		break;
-	case SND_SOC_DAIFMT_DSP_B: /* PCM delay 1 mode */
-		val = I2S_RXCR_TFS_PCM | I2S_RXCR_PBM_MODE(1);
-		break;
-	default:
-		ret = -EINVAL;
-		goto err_pm_put;
-	}
-
-	regmap_update_bits(i2s_tdm->regmap, I2S_RXCR, mask, val);
+	regmap_update_bits(i2s_tdm->regmap, I2S_RXCR, mask, rxcr_val);
 
 	if (is_tdm) {
 		switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
