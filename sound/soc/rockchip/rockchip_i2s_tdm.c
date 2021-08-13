@@ -66,7 +66,7 @@ struct rk_i2s_tdm_dev {
 	 *
 	 * e.g:
 	 * mclk_root0 is VPLL0, used for FS=48000Hz
-	 * mclk_root0 is VPLL1, used for FS=44100Hz
+	 * mclk_root1 is VPLL1, used for FS=44100Hz
 	 */
 	struct clk *mclk_root0;
 	struct clk *mclk_root1;
@@ -102,24 +102,16 @@ struct rk_i2s_tdm_dev {
 
 static int to_ch_num(unsigned int val)
 {
-	int chs;
-
 	switch (val) {
 	case I2S_CHN_4:
-		chs = 4;
-		break;
+		return 4;
 	case I2S_CHN_6:
-		chs = 6;
-		break;
+		return 6;
 	case I2S_CHN_8:
-		chs = 8;
-		break;
+		return 8;
 	default:
-		chs = 2;
-		break;
+		return 2;
 	}
-
-	return chs;
 }
 
 static int i2s_tdm_runtime_suspend(struct device *dev)
