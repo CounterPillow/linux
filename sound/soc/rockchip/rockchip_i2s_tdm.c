@@ -1544,10 +1544,13 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 
 	i2s_tdm->frame_width = 64;
 	if (!of_property_read_u32(node, "rockchip,frame-width", &val)) {
-		if ((val >= 32) && (val % 2 == 0) && (val <= 512))
+		if ((val >= 32) && (val % 2 == 0) && (val <= 512)) {
 			i2s_tdm->frame_width = val;
-		else
+		} else {
+			dev_err(i2s_tdm->dev, "unsupported frame width: '%d'\n",
+				val);
 			return -EINVAL;
+		}
 	}
 
 	if (!of_property_read_u32(node, "rockchip,trcm-sync", &val)) {
@@ -1560,9 +1563,13 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 			i2s_tdm->clk_trcm = val;
 			break;
 		default:
+			dev_err(i2s_tdm->dev,
+				"unsupported trcm-sync mode: '%d'\n", val);
 			return -EINVAL;
 		}
 	} else {
+		dev_err(i2s_tdm->dev,
+			"Missing required property rockchip,trcm-sync\n");
 		return -ENOENT;
 	}
 
@@ -1581,8 +1588,11 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 	if (i2s_tdm->clk_trcm != RK_TRCM_TXRX) {
 		cru_node = of_parse_phandle(node, "rockchip,cru", 0);
 		i2s_tdm->cru_base = of_iomap(cru_node, 0);
-		if (!i2s_tdm->cru_base)
+		if (!i2s_tdm->cru_base) {
+			dev_err(i2s_tdm->dev,
+				"Missing or unsupported rockchip,cru node\n");
 			return -ENOENT;
+		}
 
 		i2s_tdm->tx_reset_id = of_i2s_resetid_get(node, "tx-m");
 		i2s_tdm->rx_reset_id = of_i2s_resetid_get(node, "rx-m");
@@ -1603,20 +1613,28 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 	}
 
 	i2s_tdm->hclk = devm_clk_get(&pdev->dev, "hclk");
-	if (IS_ERR(i2s_tdm->hclk))
+	if (IS_ERR(i2s_tdm->hclk)) {
+		dev_err(i2s_tdm->dev, "Failed to get clock hclk\n");
 		return PTR_ERR(i2s_tdm->hclk);
+	}
 
 	ret = clk_prepare_enable(i2s_tdm->hclk);
-	if (ret)
+	if (ret) {
+		dev_err(i2s_tdm->dev, "Failed to enable clock hclk\n");
 		return ret;
+	}
 
 	i2s_tdm->mclk_tx = devm_clk_get(&pdev->dev, "mclk_tx");
-	if (IS_ERR(i2s_tdm->mclk_tx))
+	if (IS_ERR(i2s_tdm->mclk_tx)) {
+		dev_err(i2s_tdm->dev, "Failed to get clock mclk_tx\n");
 		return PTR_ERR(i2s_tdm->mclk_tx);
+	}
 
 	i2s_tdm->mclk_rx = devm_clk_get(&pdev->dev, "mclk_rx");
-	if (IS_ERR(i2s_tdm->mclk_rx))
+	if (IS_ERR(i2s_tdm->mclk_rx)) {
+		dev_err(i2s_tdm->dev, "Failed to get clock mclk_rx\n");
 		return PTR_ERR(i2s_tdm->mclk_rx);
+	}
 
 	i2s_tdm->io_multiplex =
 		of_property_read_bool(node, "rockchip,io-multiplex");
@@ -1625,20 +1643,29 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 		of_property_read_bool(node, "rockchip,mclk-calibrate");
 	if (i2s_tdm->mclk_calibrate) {
 		i2s_tdm->mclk_tx_src = devm_clk_get(&pdev->dev, "mclk_tx_src");
-		if (IS_ERR(i2s_tdm->mclk_tx_src))
+		if (IS_ERR(i2s_tdm->mclk_tx_src)) {
+			dev_err(i2s_tdm->dev,
+				"Failed to get clock mclk_tx_src\n");
 			return PTR_ERR(i2s_tdm->mclk_tx_src);
-
+		}
 		i2s_tdm->mclk_rx_src = devm_clk_get(&pdev->dev, "mclk_rx_src");
-		if (IS_ERR(i2s_tdm->mclk_rx_src))
+		if (IS_ERR(i2s_tdm->mclk_rx_src)) {
+			dev_err(i2s_tdm->dev,
+				"Failed to get clock mclk_rx_src\n");
 			return PTR_ERR(i2s_tdm->mclk_rx_src);
-
+		}
 		i2s_tdm->mclk_root0 = devm_clk_get(&pdev->dev, "mclk_root0");
-		if (IS_ERR(i2s_tdm->mclk_root0))
+		if (IS_ERR(i2s_tdm->mclk_root0)) {
+			dev_err(i2s_tdm->dev,
+				"Failed to get clock mclk_root0\n");
 			return PTR_ERR(i2s_tdm->mclk_root0);
-
+		}
 		i2s_tdm->mclk_root1 = devm_clk_get(&pdev->dev, "mclk_root1");
-		if (IS_ERR(i2s_tdm->mclk_root1))
+		if (IS_ERR(i2s_tdm->mclk_root1)) {
+			dev_err(i2s_tdm->dev,
+				"Failed to get clock mclk_root1\n");
 			return PTR_ERR(i2s_tdm->mclk_root1);
+		}
 
 		i2s_tdm->mclk_root0_initial_freq = clk_get_rate(i2s_tdm->mclk_root0);
 		i2s_tdm->mclk_root1_initial_freq = clk_get_rate(i2s_tdm->mclk_root1);
@@ -1648,13 +1675,18 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(regs))
+	if (IS_ERR(regs)) {
+		dev_err(i2s_tdm->dev,
+			"Failed to get resource IORESOURCE_MEM\n");
 		return PTR_ERR(regs);
+	}
 
 	i2s_tdm->regmap = devm_regmap_init_mmio(&pdev->dev, regs,
 					    &rockchip_i2s_tdm_regmap_config);
-	if (IS_ERR(i2s_tdm->regmap))
+	if (IS_ERR(i2s_tdm->regmap)) {
+		dev_err(i2s_tdm->dev, "Failed to initialise regmap\n");
 		return PTR_ERR(i2s_tdm->regmap);
+	}
 
 	i2s_tdm->playback_dma_data.addr = res->start + I2S_TXDR;
 	i2s_tdm->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
