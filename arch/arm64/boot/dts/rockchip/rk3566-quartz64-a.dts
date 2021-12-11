@@ -523,6 +523,17 @@
 	};
 };
 
+/* sata1 is muxed with the usb3 port */
+&sata1 {
+	status = "okay";
+};
+
+/* sata2 is muxed with the pcie2 slot*/
+&sata2 {
+	status = "disabled";
+};
+
+
 &sdhci {
 	bus-width = <8>;
 	mmc-hs200-1_8v;
