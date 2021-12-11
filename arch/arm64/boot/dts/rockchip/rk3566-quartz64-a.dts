@@ -149,6 +149,15 @@
 	};
 };
 
+&combphy1 {
+	status = "okay";
+	rockchip,enable-ssc;
+};
+
+&combphy2 {
+	status = "okay";
+};
+
 &cpu0 {
 	cpu-supply = <&vdd_cpu>;
 };
