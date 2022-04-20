@@ -46,12 +46,15 @@
  * @lcdsel_big: reg value of selecting vop big for eDP
  * @lcdsel_lit: reg value of selecting vop little for eDP
  * @chip_type: specific chip type
+ * @ssc: check if SSC is supported by source
+ * @audio: check if audio is supported by source
  */
 struct rockchip_dp_chip_data {
 	u32	lcdsel_grf_reg;
 	u32	lcdsel_big;
 	u32	lcdsel_lit;
 	u32	chip_type;
+	bool	ssc;
 };
 
 struct rockchip_dp_device {
@@ -64,6 +67,7 @@ struct rockchip_dp_device {
 	struct clk               *grfclk;
 	struct regmap            *grf;
 	struct reset_control     *rst;
+	struct reset_control     *apb_reset;
 
 	const struct rockchip_dp_chip_data *data;
 
@@ -88,6 +92,10 @@ static int rockchip_dp_pre_init(struct rockchip_dp_device *dp)
 	reset_control_assert(dp->rst);
 	usleep_range(10, 20);
 	reset_control_deassert(dp->rst);
+
+	reset_control_assert(dp->apb_reset);
+	usleep_range(10, 20);
+	reset_control_deassert(dp->apb_reset);
 
 	return 0;
 }
@@ -274,10 +282,12 @@ static int rockchip_dp_of_probe(struct rockchip_dp_device *dp)
 	struct device *dev = dp->dev;
 	struct device_node *np = dev->of_node;
 
-	dp->grf = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
-	if (IS_ERR(dp->grf)) {
-		DRM_DEV_ERROR(dev, "failed to get rockchip,grf property\n");
-		return PTR_ERR(dp->grf);
+	if (of_property_read_bool(np, "rockchip,grf")) {
+		dp->grf = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
+		if (IS_ERR(dp->grf)) {
+			DRM_DEV_ERROR(dev, "failed to get rockchip,grf property\n");
+			return PTR_ERR(dp->grf);
+		}
 	}
 
 	dp->grfclk = devm_clk_get(dev, "grf");
@@ -300,6 +310,12 @@ static int rockchip_dp_of_probe(struct rockchip_dp_device *dp)
 	if (IS_ERR(dp->rst)) {
 		DRM_DEV_ERROR(dev, "failed to get dp reset control\n");
 		return PTR_ERR(dp->rst);
+	}
+
+	dp->apb_reset = devm_reset_control_get_optional(dev, "apb");
+	if (IS_ERR(dp->apb_reset)) {
+		DRM_DEV_ERROR(dev, "failed to get apb reset control\n");
+		return PTR_ERR(dp->apb_reset);
 	}
 
 	return 0;
@@ -397,6 +413,7 @@ static int rockchip_dp_probe(struct platform_device *pdev)
 	dp->plat_data.power_on_start = rockchip_dp_poweron_start;
 	dp->plat_data.power_off = rockchip_dp_powerdown;
 	dp->plat_data.get_modes = rockchip_dp_get_modes;
+	dp->plat_data.ssc = dp->data->ssc;
 
 	ret = rockchip_dp_of_probe(dp);
 	if (ret < 0)
@@ -464,9 +481,15 @@ static const struct rockchip_dp_chip_data rk3288_dp = {
 	.chip_type = RK3288_DP,
 };
 
+static const struct rockchip_dp_chip_data rk3568_edp = {
+	.chip_type = RK3568_EDP,
+	.ssc = true,
+};
+
 static const struct of_device_id rockchip_dp_dt_ids[] = {
 	{.compatible = "rockchip,rk3288-dp", .data = &rk3288_dp },
 	{.compatible = "rockchip,rk3399-edp", .data = &rk3399_edp },
+	{.compatible = "rockchip,rk3568-edp", .data = &rk3568_edp },
 	{}
 };
 MODULE_DEVICE_TABLE(of, rockchip_dp_dt_ids);

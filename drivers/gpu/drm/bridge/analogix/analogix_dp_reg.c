@@ -11,6 +11,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/phy/phy.h>
 
 #include <drm/bridge/analogix_dp.h>
 
@@ -524,9 +525,31 @@ void analogix_dp_enable_sw_function(struct analogix_dp_device *dp)
 	writel(reg, dp->reg_base + ANALOGIX_DP_FUNC_EN_1);
 }
 
+bool analogix_dp_ssc_supported(struct analogix_dp_device *dp)
+{
+	/* Check if SSC is supported by both sides */
+	return dp->plat_data->ssc && dp->link_train.ssc;
+}
+
 void analogix_dp_set_link_bandwidth(struct analogix_dp_device *dp, u32 bwtype)
 {
+	union phy_configure_opts phy_cfg;
 	u32 reg;
+	int ret;
+
+	phy_cfg.dp.lanes = dp->link_train.lane_count;
+	phy_cfg.dp.link_rate =
+	drm_dp_bw_code_to_link_rate(dp->link_train.link_rate) / 100;
+	phy_cfg.dp.ssc = analogix_dp_ssc_supported(dp);
+	phy_cfg.dp.set_lanes = false;
+	phy_cfg.dp.set_rate = true;
+	phy_cfg.dp.set_voltages = false;
+	ret = phy_configure(dp->phy, &phy_cfg);
+	if (ret && ret != -EOPNOTSUPP) {
+		dev_err(dp->dev, "%s: phy_configure() failed: %d\n",
+			__func__, ret);
+		return;
+	}
 
 	reg = bwtype;
 	if ((bwtype == DP_LINK_BW_2_7) || (bwtype == DP_LINK_BW_1_62))
@@ -543,7 +566,20 @@ void analogix_dp_get_link_bandwidth(struct analogix_dp_device *dp, u32 *bwtype)
 
 void analogix_dp_set_lane_count(struct analogix_dp_device *dp, u32 count)
 {
+	union phy_configure_opts phy_cfg;
 	u32 reg;
+	int ret;
+
+	phy_cfg.dp.lanes = dp->link_train.lane_count;
+	phy_cfg.dp.set_lanes = true;
+	phy_cfg.dp.set_rate = false;
+	phy_cfg.dp.set_voltages = false;
+	ret = phy_configure(dp->phy, &phy_cfg);
+	if (ret && ret != -EOPNOTSUPP) {
+		dev_err(dp->dev, "%s: phy_configure() failed: %d\n",
+			__func__, ret);
+		return;
+	}
 
 	reg = count;
 	writel(reg, dp->reg_base + ANALOGIX_DP_LANE_COUNT_SET);

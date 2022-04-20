@@ -38,11 +38,12 @@ config ROCKCHIP_VOP2
 
 config ROCKCHIP_ANALOGIX_DP
 	bool "Rockchip specific extensions for Analogix DP driver"
-	depends on ROCKCHIP_VOP
+	depends on ROCKCHIP_VOP || ROCKCHIP_VOP2
 	help
 	  This selects support for Rockchip SoC specific extensions
 	  for the Analogix Core DP driver. If you want to enable DP
-	  on RK3288 or RK3399 based SoC, you should select this option.
+	  on RK3288, RK3399 or RK3568 based SoC, you should select
+	  this option.
 
 config ROCKCHIP_CDN_DP
 	bool "Rockchip cdn DP"
