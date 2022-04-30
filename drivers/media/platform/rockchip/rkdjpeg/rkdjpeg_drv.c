@@ -15,6 +15,29 @@
 
 irqreturn_t rkdjpeg_jpeg_irq_handler(int irq, void *data)
 {
+	struct rkdjpeg_dev *rkdj = (struct rkdjpeg_dev*) data;
+	int ret;
+	unsigned int intr;
+
+	ret = regmap_read(rkdj->regmap, RKDJPEG_REG_INT, &intr);
+	if (ret) {
+		dev_err(rkdj->dev, "Interrupt register read error: %d\n", ret);
+		goto reset_int_and_skedaddle;
+	}
+
+	/* TODO: handle timeout interrupt */
+	/* TODO: handle input data error interrupt */
+	/* TODO: handle AXI bus error interrupt */
+	/* TODO: handle picture ready interrupt */
+
+reset_int_and_skedaddle:
+	/* Reset sw_dec_irq_raw, as the TRM says */
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_ENABLE_RAW,
+				RKDJPEG_MASK_INT_ENABLE_RAW);
+	if (ret < 0)
+		dev_err(rkdj->dev,
+			"resetting interrupt enable register failed, this is very bad\n");
 	return IRQ_HANDLED;
 }
 
@@ -117,6 +140,8 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 	/* JPEG IRQ */
 	irq = platform_get_irq_byname(pdev, "jpeg");
 	if (irq < 0) {
+		dev_err(&pdev->dev, "error retrieving 'jpeg' interrupt: %d\n",
+			irq);
 		ret = irq;
 		goto err_disable_aclk;
 	}
@@ -126,20 +151,34 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 					DRIVER_NAME "-jpeg", rkdj);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to request jpeg irq\n");
-		return ret;
+		goto err_disable_aclk;
+	}
+
+	/* Enable timeout interrupt */
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_ENABLE_RAW,
+				RKDJPEG_MASK_INT_ENABLE_RAW);
+	if (ret < 0) {
+		dev_err(&pdev->dev,
+			"couldn't write to the interrupt control register: %d\n",
+			ret);
+		goto err_disable_aclk;
 	}
 
 	int prod_num, bit_depth, minor_ver;
 	ret = rkdjpeg_get_hw_version(rkdj, &prod_num, &bit_depth, &minor_ver);
 	if (ret < 0) {
 		dev_err(rkdj->dev, "Actual error! %d\n", ret);
-		goto err_disable_aclk;
+		goto err_disable_timeout_int;
 	}
 	dev_err(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
 		prod_num, minor_ver, bit_depth);
 
 	return 0;
 
+err_disable_timeout_int:
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_ENABLE_RAW, 0);
 err_disable_aclk:
 	clk_disable_unprepare(rkdj->aclk);
 err_disable_hclk:
