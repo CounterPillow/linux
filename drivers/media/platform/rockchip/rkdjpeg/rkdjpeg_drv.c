@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -11,6 +12,11 @@
 #define DRIVER_NAME "rkdjpeg"
 
 #define DEBUG
+
+irqreturn_t rkdjpeg_jpeg_irq_handler(int irq, void *data)
+{
+	return IRQ_HANDLED;
+}
 
 static int rkdjpeg_get_hw_version(struct rkdjpeg_dev *rkdj, int* version,
 				  int* bit_depth, int* minor_version)
@@ -58,7 +64,7 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 	struct rkdjpeg_dev *rkdj;
 	struct resource *res;
 	void __iomem *regs;
-	int ret;
+	int irq, ret;
 
 	rkdj = devm_kzalloc(&pdev->dev, sizeof(*rkdj), GFP_KERNEL);
 	if (!rkdj)
@@ -106,6 +112,21 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		ret = dev_err_probe(rkdj->dev, PTR_ERR(rkdj->regmap),
 				    "Failed to initialise regmap\n");
 		goto err_disable_aclk;
+	}
+
+	/* JPEG IRQ */
+	irq = platform_get_irq_byname(pdev, "jpeg");
+	if (irq < 0) {
+		ret = irq;
+		goto err_disable_aclk;
+	}
+
+	ret = devm_request_threaded_irq(&pdev->dev, irq, NULL,
+					rkdjpeg_jpeg_irq_handler, IRQF_ONESHOT,
+					DRIVER_NAME "-jpeg", rkdj);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to request jpeg irq\n");
+		return ret;
 	}
 
 	int prod_num, bit_depth, minor_ver;

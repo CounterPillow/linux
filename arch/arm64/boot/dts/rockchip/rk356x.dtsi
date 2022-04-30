@@ -637,6 +637,7 @@
 		compatible = "rockchip,rk3568-rkdjpeg";
 		reg = <0x0 0xfded0000 0x0 0x300>;
 		interrupts = <GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "jpeg";
 		clocks = <&cru ACLK_JDEC>, <&cru HCLK_JDEC>;
 		clock-names = "aclk", "hclk";
 		iommus = <&rkdjpeg_mmu>;
