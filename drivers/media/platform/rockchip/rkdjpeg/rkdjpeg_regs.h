@@ -1,0 +1,15 @@
+#ifndef RKDJPEG_REGS_H_
+#define RKDJPEG_REGS_H_
+
+#include <linux/bits.h>
+
+#define RKDJPEG_REG_ID			0x00
+#define RKDJPEG_MASK_PROD_NUM		GENMASK(31, 16)
+#define RKDJPEG_MASK_MAX_BIT_DEPTH	BIT(8)
+#define RKDJPEG_MASK_MINOR_VER		GENMASK(7, 0)
+
+#define RKDJPEG_REG_INT			0x04
+
+#define RKDJPEG_REG_PERF_WRK_CNT	0x9c
+
+#endif /* RKDJPEG_REGS_H_ */
