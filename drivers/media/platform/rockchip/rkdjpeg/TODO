@@ -1,6 +1,6 @@
-- Define JPEG decoding controls
+- learn about existing v4l2 stateful jpeg decoder interface
+	- v4l2-jpeg.c etc
 - add v4l2 interface exposing a /dev/video device
-	- make it take in a JPEG, output a black frame
-- Set up huffman table from controls?
-- Set up quantisation table from controls?
+- Set up huffman table from parsed input data
+- Set up quantisation table from parsed input data
 - take coded data from v4l2, set input and output reg address, decode
