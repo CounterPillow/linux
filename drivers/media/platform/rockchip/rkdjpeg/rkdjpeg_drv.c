@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
+#define DEBUG
 
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -11,7 +12,6 @@
 
 #define DRIVER_NAME "rkdjpeg"
 
-#define DEBUG
 
 irqreturn_t rkdjpeg_jpeg_irq_handler(int irq, void *data)
 {
@@ -96,6 +96,8 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 	rkdj->dev = &pdev->dev;
 	rkdj->pdev = pdev;
 
+	platform_set_drvdata(pdev, rkdj);
+
 	rkdj->hclk = devm_clk_get(&pdev->dev, "hclk");
 	if (IS_ERR(rkdj->hclk)) {
 		return dev_err_probe(rkdj->dev, PTR_ERR(rkdj->hclk),
@@ -108,17 +110,17 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 				     "Failed to enable clock hclk\n");
 	}
 
-	rkdj->hclk = devm_clk_get(&pdev->dev, "aclk");
-	if (IS_ERR(rkdj->hclk)) {
-		ret = dev_err_probe(rkdj->dev, PTR_ERR(rkdj->hclk),
-				    "Failed to get clock hclk\n");
+	rkdj->aclk = devm_clk_get(&pdev->dev, "aclk");
+	if (IS_ERR(rkdj->aclk)) {
+		ret = dev_err_probe(rkdj->dev, PTR_ERR(rkdj->aclk),
+				    "Failed to get clock aclk\n");
 		goto err_disable_hclk;
 	}
 
-	ret = clk_prepare_enable(rkdj->hclk);
+	ret = clk_prepare_enable(rkdj->aclk);
 	if (ret) {
 		ret = dev_err_probe(rkdj->dev, ret,
-				    "Failed to enable clock hclk\n");
+				    "Failed to enable clock aclk\n");
 		goto err_disable_hclk;
 	}
 
@@ -171,7 +173,7 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		dev_err(rkdj->dev, "Actual error! %d\n", ret);
 		goto err_disable_timeout_int;
 	}
-	dev_err(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
+	dev_dbg(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
 		prod_num, minor_ver, bit_depth);
 
 	return 0;
@@ -190,6 +192,10 @@ err_disable_hclk:
 static int rkdjpeg_remove(struct platform_device *pdev)
 {
 	struct rkdjpeg_dev *rkdj = platform_get_drvdata(pdev);
+
+	regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+			  RKDJPEG_MASK_INT_ENABLE_RAW, 0);
+
 	clk_disable_unprepare(rkdj->aclk);
 	clk_disable_unprepare(rkdj->hclk);
 
