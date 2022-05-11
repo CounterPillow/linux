@@ -17,6 +17,76 @@
 
 #define DRIVER_NAME "rkdjpeg"
 
+static int rkdjpeg_get_hw_version(struct rkdjpeg_dev *rkdj, int* version,
+				  int* bit_depth, int* minor_version)
+{
+	int ret;
+	int val;
+
+	ret = regmap_read(rkdj->regmap, RKDJPEG_REG_ID, &val);
+	if (ret)
+		return ret;
+
+	*version = val & RKDJPEG_MASK_PROD_NUM;
+	*bit_depth = (val & RKDJPEG_MASK_MAX_BIT_DEPTH) ? 12 : 8;
+	*minor_version = val & RKDJPEG_MASK_MINOR_VER;
+
+	return 0;
+}
+
+int rkdjpeg_init_hw(struct rkdjpeg_dev *rkdj)
+{
+	int ret;
+	/* Enable interrupt */
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_ENABLE_RAW,
+				RKDJPEG_MASK_INT_ENABLE_RAW);
+	if (ret < 0) {
+		dev_err(rkdj->dev,
+			"couldn't write to the interrupt control register: %d\n",
+			ret);
+		return ret;
+	}
+
+	/* Enable timeout */
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_TIMEOUT_EN,
+				RKDJPEG_MASK_INT_TIMEOUT_EN);
+	if (ret < 0) {
+		dev_err(rkdj->dev,
+			"couldn't enable the timeout interrupt: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+int rkdjpeg_uninit_hw(struct rkdjpeg_dev *rkdj)
+{
+	int ret;
+
+	/* Disable timeout */
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_TIMEOUT_EN, 0);
+	if (ret < 0) {
+		dev_err(rkdj->dev,
+			"couldn't disable the timeout interrupt: %d\n", ret);
+		return ret;
+	}
+
+	/* Disable interrupt */
+	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
+				RKDJPEG_MASK_INT_ENABLE_RAW, 0);
+	if (ret < 0) {
+		dev_err(rkdj->dev,
+			"couldn't write to the interrupt control register: %d\n",
+			ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 static int rkdjpeg_querycap(struct file *file, void *priv,
 			     struct v4l2_capability *cap)
 {
@@ -31,22 +101,82 @@ static const struct v4l2_ioctl_ops rkdjpeg_ioctl_ops = {
 	.vidioc_querycap	= rkdjpeg_querycap,
 };
 
+static int rkdjpeg_enable_clocks(struct rkdjpeg_dev *rkdj)
+{
+	int ret;
+
+	ret = clk_enable(rkdj->hclk);
+	if (ret) {
+		dev_err(rkdj->dev, "Failed to enable clock hclk: %d\n", ret);
+		return ret;
+	}
+
+	ret = clk_enable(rkdj->aclk);
+	if (ret) {
+		dev_err(rkdj->dev, "Failed to enable clock aclk: %d\n", ret);
+		/* Disable the previously enabled hclk in this error path */
+		clk_disable(rkdj->hclk);
+	}
+
+	return ret;
+}
+
+static void rkdjpeg_disable_clocks(struct rkdjpeg_dev *rkdj)
+{
+	clk_disable(rkdj->aclk);
+	clk_disable(rkdj->hclk);
+}
+
 static int rkdjpeg_open(struct file *file)
 {
+	struct rkdjpeg_dev *rkdj = video_get_drvdata(video_devdata(file));
+#ifdef DEBUG
+	int prod_num, bit_depth, minor_ver;
+#endif
+	int ret;
 	/* FIXME: implement this. Should open a v4l2 m2m context */
-	/* Also enable the clocks and set up the hardware here? */
+	rkdjpeg_enable_clocks(rkdj);
+	ret = rkdjpeg_init_hw(rkdj);
+	if (ret < 0) {
+		dev_err(rkdj->dev, "failed to initialise hardware (%d)\n", ret);
+		/* intentionally try to undo all the reg writes here */
+		goto err_disable_clk_and_hw;
+	}
+
+#ifdef DEBUG
+	ret = rkdjpeg_get_hw_version(rkdj, &prod_num, &bit_depth, &minor_ver);
+	if (ret < 0) {
+		dev_err(rkdj->dev, "Error getting hw version info: %d\n", ret);
+		goto err_disable_clk_and_hw;
+	}
+	dev_dbg(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
+		prod_num, minor_ver, bit_depth);
+#endif
+
 	return 0;
+
+err_disable_clk_and_hw:
+	rkdjpeg_uninit_hw(rkdj);
+	rkdjpeg_disable_clocks(rkdj);
+	return ret;
 }
 
 static int rkdjpeg_release(struct file *file)
 {
+	struct rkdjpeg_dev *rkdj = video_get_drvdata(video_devdata(file));
+	int ret;
 	/* FIXME: implement this.
 	 *  - end any currently ongoing stream
 	 *  - free the context
-	 *  - uninit the hardware
-	 *  - stop the clocks
 	 */
-	return 0;
+	ret = rkdjpeg_uninit_hw(rkdj);
+	if (ret < 0) {
+		dev_err(rkdj->dev, "failed to uninitialise hardware (%d)\n", ret);
+	};
+
+	rkdjpeg_disable_clocks(rkdj);
+
+	return ret;
 }
 
 static const struct v4l2_file_operations rkdjpeg_fops = {
@@ -118,23 +248,6 @@ reset_int_and_skedaddle:
 	return IRQ_HANDLED;
 }
 
-static int rkdjpeg_get_hw_version(struct rkdjpeg_dev *rkdj, int* version,
-				  int* bit_depth, int* minor_version)
-{
-	int ret;
-	int val;
-
-	ret = regmap_read(rkdj->regmap, RKDJPEG_REG_ID, &val);
-	if (ret)
-		return ret;
-
-	*version = val & RKDJPEG_MASK_PROD_NUM;
-	*bit_depth = (val & RKDJPEG_MASK_MAX_BIT_DEPTH) ? 12 : 8;
-	*minor_version = val & RKDJPEG_MASK_MINOR_VER;
-
-	return 0;
-}
-
 static bool rkdjpeg_writeable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
@@ -159,59 +272,6 @@ static const struct of_device_id of_rkdjpeg_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_rkdjpeg_match);
 
-int rkdjpeg_init_hw(struct rkdjpeg_dev *rkdj)
-{
-	int ret;
-	/* Enable interrupt */
-	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
-				RKDJPEG_MASK_INT_ENABLE_RAW,
-				RKDJPEG_MASK_INT_ENABLE_RAW);
-	if (ret < 0) {
-		dev_err(rkdj->dev,
-			"couldn't write to the interrupt control register: %d\n",
-			ret);
-		return ret;
-	}
-
-	/* Enable timeout */
-	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
-				RKDJPEG_MASK_INT_TIMEOUT_EN,
-				RKDJPEG_MASK_INT_TIMEOUT_EN);
-	if (ret < 0) {
-		dev_err(rkdj->dev,
-			"couldn't enable the timeout interrupt: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
-int rkdjpeg_uninit_hw(struct rkdjpeg_dev *rkdj)
-{
-	int ret;
-
-	/* Disable timeout */
-	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
-				RKDJPEG_MASK_INT_TIMEOUT_EN, 0);
-	if (ret < 0) {
-		dev_err(rkdj->dev,
-			"couldn't disable the timeout interrupt: %d\n", ret);
-		return ret;
-	}
-
-	/* Disable interrupt */
-	ret = regmap_write_bits(rkdj->regmap, RKDJPEG_REG_INT,
-				RKDJPEG_MASK_INT_ENABLE_RAW, 0);
-	if (ret < 0) {
-		dev_err(rkdj->dev,
-			"couldn't write to the interrupt control register: %d\n",
-			ret);
-		return ret;
-	}
-
-	return 0;
-}
-
 static int rkdjpeg_probe(struct platform_device *pdev)
 {
 	struct rkdjpeg_dev *rkdj;
@@ -235,10 +295,10 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 				     "Failed to get clock hclk\n");
 	}
 
-	ret = clk_prepare_enable(rkdj->hclk);
+	ret = clk_prepare(rkdj->hclk);
 	if (ret) {
 		return dev_err_probe(rkdj->dev, ret,
-				     "Failed to enable clock hclk\n");
+				     "Failed to prepare clock hclk\n");
 	}
 
 	rkdj->aclk = devm_clk_get(&pdev->dev, "aclk");
@@ -248,10 +308,10 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		goto err_disable_hclk;
 	}
 
-	ret = clk_prepare_enable(rkdj->aclk);
+	ret = clk_prepare(rkdj->aclk);
 	if (ret) {
 		ret = dev_err_probe(rkdj->dev, ret,
-				    "Failed to enable clock aclk\n");
+				    "Failed to prepare clock aclk\n");
 		goto err_disable_hclk;
 	}
 
@@ -299,28 +359,7 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		goto err_unregister_video_dev;
 	}
 
-	ret = rkdjpeg_init_hw(rkdj);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "failed to initialise hardware (%d)\n", ret);
-		/* intentionally try to undo all the reg writes here */
-		goto err_uninit_hw;
-	}
-
-	int prod_num, bit_depth, minor_ver;
-	ret = rkdjpeg_get_hw_version(rkdj, &prod_num, &bit_depth, &minor_ver);
-	if (ret < 0) {
-		dev_err(rkdj->dev, "Actual error! %d\n", ret);
-		goto err_uninit_hw;
-	}
-	dev_dbg(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
-		prod_num, minor_ver, bit_depth);
-
 	return 0;
-
-err_uninit_hw:
-	ret = rkdjpeg_uninit_hw(rkdj);
-	if (ret)
-		dev_err(rkdj->dev, "uninitialising hardware failed (%d)\n", ret);
 
 err_unregister_video_dev:
 	video_unregister_device(rkdj->vfd);
