@@ -226,7 +226,7 @@ int rkdjpeg_register_video_dev(struct rkdjpeg_dev *rkdj)
 
 	vfd->fops = &rkdjpeg_fops;
 	vfd->ioctl_ops = &rkdjpeg_ioctl_ops;
-	vfd->release = video_device_release_empty;	/* FIXME: check if correct */
+	vfd->release = video_device_release;	/* FIXME: check if correct */
 	vfd->lock = &rkdj->rkdjpeg_mutex;
 	vfd->v4l2_dev = &rkdj->v4l2_dev;
 	vfd->vfl_dir = VFL_DIR_M2M;
