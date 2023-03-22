@@ -17,6 +17,30 @@
 
 #define DRIVER_NAME "rkdjpeg"
 
+static const u32 rkdjpeg_rk3568_cap_fmts[] = {
+	V4L2_PIX_FMT_NV12M,
+	V4L2_PIX_FMT_NV16M,
+	V4L2_PIX_FMT_NV24M
+};
+
+static const u32 rkdjpeg_rk3568_out_fmts[] = {
+	V4L2_PIX_FMT_JPEG,
+	V4L2_PIX_FMT_MJPEG
+};
+
+static const struct rkdjpeg_variant rkdjpeg_rk3568_variant = {
+	.cap_fmts = rkdjpeg_rk3568_cap_fmts,
+	.num_cap_fmts = ARRAY_SIZE(rkdjpeg_rk3568_cap_fmts),
+	.out_fmts = rkdjpeg_rk3568_out_fmts,
+	.num_out_fmts = ARRAY_SIZE(rkdjpeg_rk3568_out_fmts),
+	.mpps = 240,
+	.min_width = 48,
+	.min_height = 48,
+	.max_width = 65536,
+	.max_height = 65536,
+	.step_size = 8
+};
+
 static int rkdjpeg_get_hw_version(struct rkdjpeg_dev *rkdj, int* version,
 				  int* bit_depth, int* minor_version)
 {
