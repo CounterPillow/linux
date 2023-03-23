@@ -4,6 +4,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/videodev2.h>
@@ -291,13 +292,14 @@ static const struct regmap_config rkdjpeg_regmap_config = {
 };
 
 static const struct of_device_id of_rkdjpeg_match[] = {
-	{ .compatible = "rockchip,rk3568-rkdjpeg"},
+	{ .compatible = "rockchip,rk3568-rkdjpeg", .data = &rkdjpeg_rk3568_variant},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, of_rkdjpeg_match);
 
 static int rkdjpeg_probe(struct platform_device *pdev)
 {
+	const struct of_device_id *of_id;
 	struct rkdjpeg_dev *rkdj;
 	struct resource *res;
 	void __iomem *regs;
@@ -309,6 +311,13 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 
 	rkdj->dev = &pdev->dev;
 	rkdj->pdev = pdev;
+
+	of_id = of_match_device(of_rkdjpeg_match, &pdev->dev);
+	if (!of_id)
+		return -EINVAL;
+
+	rkdj->variant = (struct rkdjpeg_variant *)of_id->data;
+
 	mutex_init(&rkdj->rkdjpeg_mutex);
 
 	platform_set_drvdata(pdev, rkdj);

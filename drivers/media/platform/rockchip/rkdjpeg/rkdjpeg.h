@@ -10,18 +10,6 @@
 #define RKDJPEG_FMT_FLAG_OUTPUT		BIT(0)
 #define RKDJPEG_FMT_FLAG_CAPTURE	BIT(1)
 
-struct rkdjpeg_dev {
-	struct platform_device *pdev;
-	struct device *dev;
-	struct regmap *regmap;
-	struct clk *hclk;
-	struct clk *aclk;
-	struct v4l2_device v4l2_dev;
-	struct video_device *vfd;
-
-	struct mutex rkdjpeg_mutex;	/* video_device lock */
-};
-
 /**
  * struct rkdjpeg_variant - Implementation variant of the rkdjpeg hardware
  * @cap_fmts:		decoder capture (decoded data out) formats
@@ -46,6 +34,19 @@ struct rkdjpeg_variant {
 	const int max_width;
 	const int max_height;
 	const int step_size;
+};
+
+struct rkdjpeg_dev {
+	struct platform_device *pdev;
+	struct device *dev;
+	struct regmap *regmap;
+	struct clk *hclk;
+	struct clk *aclk;
+	struct v4l2_device v4l2_dev;
+	struct video_device *vfd;
+	struct rkdjpeg_variant *variant;
+
+	struct mutex rkdjpeg_mutex;	/* video_device lock */
 };
 
 #endif /* _RKDJPEG_H */
