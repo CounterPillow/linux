@@ -495,6 +495,17 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		goto err_disable_aclk;
 	}
 
+	/*
+	 * Cargo-culted from Hantro. Hardware can only handle 32 bit
+	 * addresses, so I think this should appropriately restrict it
+	 */
+	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+	if (ret) {
+		dev_err(&pdev->dev, "Could not set DMA coherent mask.\n");
+		return ret;
+	}
+	vb2_dma_contig_set_max_seg_size(&pdev->dev, DMA_BIT_MASK(32));
+
 	ret = v4l2_device_register(&pdev->dev, &rkdj->v4l2_dev);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to register v4l2 device\n");
