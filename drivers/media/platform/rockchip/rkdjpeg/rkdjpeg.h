@@ -45,8 +45,23 @@ struct rkdjpeg_dev {
 	struct v4l2_device v4l2_dev;
 	struct video_device *vfd;
 	struct rkdjpeg_variant *variant;
+	struct v4l2_m2m_dev *m2m_dev;
 
 	struct mutex rkdjpeg_mutex;	/* video_device lock */
+};
+
+struct rkdjpeg_ctx {
+	struct rkdjpeg_dev *rkdj;
+	struct v4l2_fh fh;
+};
+
+struct rkdjpeg_src_buf {
+	u32 frame_num;
+	struct vb2_v4l2_buffer b;
+	struct list_head list;
+	u32 bs_size;
+
+	struct rkdjpeg_ctx *curr_ctx;
 };
 
 #endif /* _RKDJPEG_H */

@@ -12,6 +12,8 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-mem2mem.h>
+#include <media/videobuf2-core.h>
+#include <media/videobuf2-dma-contig.h>
 
 #include "rkdjpeg.h"
 #include "rkdjpeg_regs.h"
@@ -120,10 +122,57 @@ static int rkdjpeg_querycap(struct file *file, void *priv,
 	strscpy(cap->bus_info, "platform:" DRIVER_NAME, sizeof(cap->bus_info));
 
 	return 0;
+
+}
+
+static int rkdjpeg_enum_fmt_vid_cap(struct file *file, void *priv,
+				     struct v4l2_fmtdesc *f)
+{
+	struct rkdjpeg_ctx *ctx =
+		container_of(file->private_data, struct rkdjpeg_ctx, fh);
+	struct rkdjpeg_dev *rkdj = ctx->rkdj;
+	int i;
+
+	if (f->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+		return -EINVAL;
+	}
+
+	for (i = 0; i < rkdj->variant->num_cap_fmts; i++) {
+		if (f->index == i) {
+			f->pixelformat = rkdj->variant->cap_fmts[i];
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static int rkdjpeg_enum_fmt_vid_out(struct file *file, void *priv,
+				     struct v4l2_fmtdesc *f)
+{
+	struct rkdjpeg_ctx *ctx =
+		container_of(file->private_data, struct rkdjpeg_ctx, fh);
+	struct rkdjpeg_dev *rkdj = ctx->rkdj;
+	int i;
+
+	if (f->type != V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+		return -EINVAL;
+	}
+
+	for (i = 0; i < rkdj->variant->num_out_fmts; i++) {
+		if (f->index == i) {
+			f->pixelformat = rkdj->variant->out_fmts[i];
+			return 0;
+		}
+	}
+
+	return -EINVAL;
 }
 
 static const struct v4l2_ioctl_ops rkdjpeg_ioctl_ops = {
 	.vidioc_querycap	= rkdjpeg_querycap,
+	.vidioc_enum_fmt_vid_cap	= rkdjpeg_enum_fmt_vid_cap,
+	.vidioc_enum_fmt_vid_out	= rkdjpeg_enum_fmt_vid_out,
 };
 
 static int rkdjpeg_enable_clocks(struct rkdjpeg_dev *rkdj)
@@ -152,14 +201,68 @@ static void rkdjpeg_disable_clocks(struct rkdjpeg_dev *rkdj)
 	clk_disable(rkdj->hclk);
 }
 
+const struct vb2_ops rkdjpeg_queue_ops = {
+};
+
+static int
+queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
+{
+	struct rkdjpeg_ctx *ctx = priv;
+	int ret;
+
+	src_vq->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+	src_vq->io_modes = VB2_MMAP | VB2_DMABUF;
+	src_vq->drv_priv = ctx;
+	src_vq->ops = &rkdjpeg_queue_ops;
+	src_vq->mem_ops = &vb2_dma_contig_memops;
+
+	src_vq->buf_struct_size = sizeof(struct rkdjpeg_src_buf);
+	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	src_vq->lock = &ctx->rkdj->rkdjpeg_mutex;
+	src_vq->dev = ctx->rkdj->v4l2_dev.dev;
+
+	ret = vb2_queue_init(src_vq);
+	if (ret)
+		return ret;
+
+	dst_vq->mem_ops = &vb2_dma_contig_memops;
+	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
+	dst_vq->drv_priv = ctx;
+	dst_vq->ops = &rkdjpeg_queue_ops;
+	dst_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
+	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	dst_vq->lock = &ctx->rkdj->rkdjpeg_mutex;
+	dst_vq->dev = ctx->rkdj->v4l2_dev.dev;
+
+	return vb2_queue_init(dst_vq);
+}
+
 static int rkdjpeg_open(struct file *file)
 {
 	struct rkdjpeg_dev *rkdj = video_get_drvdata(video_devdata(file));
+	struct video_device *vdev = video_devdata(file);
+	struct rkdjpeg_ctx *ctx;
 #ifdef DEBUG
 	int prod_num, bit_depth, minor_ver;
 #endif
 	int ret;
-	/* FIXME: implement this. Should open a v4l2 m2m context */
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->rkdj = rkdj;
+	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(rkdj->m2m_dev, ctx, queue_init);
+	if (IS_ERR(ctx->fh.m2m_ctx)) {
+		ret = PTR_ERR(ctx->fh.m2m_ctx);
+		goto err_ctx_free;
+	}
+
+	v4l2_fh_init(&ctx->fh, vdev);
+	file->private_data = &ctx->fh;
+	v4l2_fh_add(&ctx->fh);
+
 	rkdjpeg_enable_clocks(rkdj);
 	ret = rkdjpeg_init_hw(rkdj);
 	if (ret < 0) {
@@ -183,6 +286,11 @@ static int rkdjpeg_open(struct file *file)
 err_disable_clk_and_hw:
 	rkdjpeg_uninit_hw(rkdj);
 	rkdjpeg_disable_clocks(rkdj);
+	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
+	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_exit(&ctx->fh);
+err_ctx_free:
+	kfree(ctx);
 	return ret;
 }
 
@@ -190,9 +298,16 @@ static int rkdjpeg_release(struct file *file)
 {
 	struct rkdjpeg_dev *rkdj = video_get_drvdata(video_devdata(file));
 	int ret;
+	struct rkdjpeg_ctx *ctx =
+		container_of(file->private_data, struct rkdjpeg_ctx, fh);
+
+	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
+	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_exit(&ctx->fh);
+	kfree(ctx);
 	/* FIXME: implement this.
 	 *  - end any currently ongoing stream
-	 *  - free the context
+	 *  - control handler stuff?
 	 */
 	ret = rkdjpeg_uninit_hw(rkdj);
 	if (ret < 0) {
