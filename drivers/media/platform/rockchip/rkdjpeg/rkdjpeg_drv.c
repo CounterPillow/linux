@@ -169,10 +169,56 @@ static int rkdjpeg_enum_fmt_vid_out(struct file *file, void *priv,
 	return -EINVAL;
 }
 
+static bool rkdjpeg_format_supported(struct rkdjpeg_dev *rkdj, bool capture,
+				     bool output, u32 pixel_format)
+{
+	int i;
+
+	if (capture) {
+		for (i = 0; i < rkdj->variant->num_cap_fmts; i++) {
+			if (pixel_format == rkdj->variant->cap_fmts[i])
+				return true;
+		}
+	}
+	if (output) {
+		for (i = 0; i < rkdj->variant->num_out_fmts; i++) {
+			if (pixel_format == rkdj->variant->out_fmts[i])
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static int rkdjpeg_enum_framesizes(struct file *file, void *priv,
+				   struct v4l2_frmsizeenum *fsize)
+{
+	struct rkdjpeg_ctx *ctx =
+		container_of(file->private_data, struct rkdjpeg_ctx, fh);
+	struct rkdjpeg_dev *rkdj = ctx->rkdj;
+
+	if (fsize->index != 0)
+		return -EINVAL;
+
+	if (!rkdjpeg_format_supported(rkdj, true, true, fsize->pixel_format))
+		return -EINVAL;
+
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = rkdj->variant->min_width;
+	fsize->stepwise.min_height = rkdj->variant->min_height;
+	fsize->stepwise.max_width = rkdj->variant->max_width;
+	fsize->stepwise.max_height = rkdj->variant->max_height;
+	fsize->stepwise.step_width = rkdj->variant->step_size;
+	fsize->stepwise.step_height = rkdj->variant->step_size;
+
+	return 0;
+}
+
 static const struct v4l2_ioctl_ops rkdjpeg_ioctl_ops = {
-	.vidioc_querycap	= rkdjpeg_querycap,
+	.vidioc_querycap		= rkdjpeg_querycap,
 	.vidioc_enum_fmt_vid_cap	= rkdjpeg_enum_fmt_vid_cap,
 	.vidioc_enum_fmt_vid_out	= rkdjpeg_enum_fmt_vid_out,
+	.vidioc_enum_framesizes		= rkdjpeg_enum_framesizes,
 };
 
 static int rkdjpeg_enable_clocks(struct rkdjpeg_dev *rkdj)
