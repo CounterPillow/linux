@@ -247,7 +247,29 @@ static void rkdjpeg_disable_clocks(struct rkdjpeg_dev *rkdj)
 	clk_disable(rkdj->hclk);
 }
 
+
+static int
+rkdjpeg_queue_setup(struct vb2_queue *vq, unsigned int *num_buffers,
+		   unsigned int *num_planes, unsigned int sizes[],
+		   struct device *alloc_devs[])
+{
+	/* FIXME: Implement this */
+	return 0;
+}
+
+static void rkdjpeg_buf_queue(struct vb2_buffer *vb)
+{
+	struct rkdjpeg_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+
+	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
+}
+
 const struct vb2_ops rkdjpeg_queue_ops = {
+	.queue_setup = rkdjpeg_queue_setup,
+	.buf_queue = rkdjpeg_buf_queue,
+	.wait_prepare = vb2_ops_wait_prepare,
+	.wait_finish = vb2_ops_wait_finish,
 };
 
 static int

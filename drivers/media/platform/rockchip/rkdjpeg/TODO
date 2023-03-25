@@ -1,3 +1,4 @@
+- move hardware uninitialisation to pm
 - learn about existing v4l2 stateful jpeg decoder interface
 	- v4l2-jpeg.c etc
 - add v4l2 interface exposing a /dev/video device
