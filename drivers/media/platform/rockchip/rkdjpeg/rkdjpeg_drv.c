@@ -6,6 +6,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-dev.h>
@@ -31,6 +32,16 @@ static const u32 rkdjpeg_rk3568_out_fmts[] = {
 	V4L2_PIX_FMT_MJPEG
 };
 
+static void rkdjpeg_dec_device_run(void *priv)
+{
+	/* FIXME: implement this */
+	return;
+}
+
+static const struct v4l2_m2m_ops rkdjpeg_m2m_ops = {
+	.device_run = rkdjpeg_dec_device_run,
+};
+
 static const struct rkdjpeg_variant rkdjpeg_rk3568_variant = {
 	.cap_fmts = rkdjpeg_rk3568_cap_fmts,
 	.num_cap_fmts = ARRAY_SIZE(rkdjpeg_rk3568_cap_fmts),
@@ -41,7 +52,8 @@ static const struct rkdjpeg_variant rkdjpeg_rk3568_variant = {
 	.min_height = 48,
 	.max_width = 65536,
 	.max_height = 65536,
-	.step_size = 8
+	.step_size = 8,
+	.m2m_ops = &rkdjpeg_m2m_ops,
 };
 
 static int rkdjpeg_get_hw_version(struct rkdjpeg_dev *rkdj, int* version,
@@ -225,17 +237,17 @@ static int rkdjpeg_enable_clocks(struct rkdjpeg_dev *rkdj)
 {
 	int ret;
 
-	ret = clk_enable(rkdj->hclk);
+	ret = clk_prepare_enable(rkdj->hclk);
 	if (ret) {
 		dev_err(rkdj->dev, "Failed to enable clock hclk: %d\n", ret);
 		return ret;
 	}
 
-	ret = clk_enable(rkdj->aclk);
+	ret = clk_prepare_enable(rkdj->aclk);
 	if (ret) {
 		dev_err(rkdj->dev, "Failed to enable clock aclk: %d\n", ret);
 		/* Disable the previously enabled hclk in this error path */
-		clk_disable(rkdj->hclk);
+		clk_disable_unprepare(rkdj->hclk);
 	}
 
 	return ret;
@@ -243,8 +255,8 @@ static int rkdjpeg_enable_clocks(struct rkdjpeg_dev *rkdj)
 
 static void rkdjpeg_disable_clocks(struct rkdjpeg_dev *rkdj)
 {
-	clk_disable(rkdj->aclk);
-	clk_disable(rkdj->hclk);
+	clk_disable_unprepare(rkdj->aclk);
+	clk_disable_unprepare(rkdj->hclk);
 }
 
 
@@ -311,52 +323,39 @@ static int rkdjpeg_open(struct file *file)
 	struct rkdjpeg_dev *rkdj = video_get_drvdata(video_devdata(file));
 	struct video_device *vdev = video_devdata(file);
 	struct rkdjpeg_ctx *ctx;
-#ifdef DEBUG
-	int prod_num, bit_depth, minor_ver;
-#endif
 	int ret;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
+	if (mutex_lock_interruptible(&rkdj->rkdjpeg_mutex)) {
+		ret = -ERESTARTSYS;
+		goto err_ctx_free;
+	}
+
 	ctx->rkdj = rkdj;
 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(rkdj->m2m_dev, ctx, queue_init);
 	if (IS_ERR(ctx->fh.m2m_ctx)) {
 		ret = PTR_ERR(ctx->fh.m2m_ctx);
-		goto err_ctx_free;
+		dev_err(rkdj->dev, "failed initialising m2m ctx! (%d)\n", ret);
+		goto err_mutex_unlock;
 	}
 
 	v4l2_fh_init(&ctx->fh, vdev);
 	file->private_data = &ctx->fh;
 	v4l2_fh_add(&ctx->fh);
 
-	rkdjpeg_enable_clocks(rkdj);
-	ret = rkdjpeg_init_hw(rkdj);
-	if (ret < 0) {
-		dev_err(rkdj->dev, "failed to initialise hardware (%d)\n", ret);
-		/* intentionally try to undo all the reg writes here */
-		goto err_disable_clk_and_hw;
-	}
 
-#ifdef DEBUG
-	ret = rkdjpeg_get_hw_version(rkdj, &prod_num, &bit_depth, &minor_ver);
-	if (ret < 0) {
-		dev_err(rkdj->dev, "Error getting hw version info: %d\n", ret);
-		goto err_disable_clk_and_hw;
-	}
-	dev_dbg(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
-		prod_num, minor_ver, bit_depth);
-#endif
-
+	mutex_unlock(&rkdj->rkdjpeg_mutex);
 	return 0;
 
-err_disable_clk_and_hw:
-	rkdjpeg_uninit_hw(rkdj);
-	rkdjpeg_disable_clocks(rkdj);
+err_ctx_release:
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	v4l2_fh_del(&ctx->fh);
 	v4l2_fh_exit(&ctx->fh);
+err_mutex_unlock:
+	mutex_unlock(&rkdj->rkdjpeg_mutex);
 err_ctx_free:
 	kfree(ctx);
 	return ret;
@@ -364,27 +363,22 @@ err_ctx_free:
 
 static int rkdjpeg_release(struct file *file)
 {
-	struct rkdjpeg_dev *rkdj = video_get_drvdata(video_devdata(file));
-	int ret;
+	struct rkdjpeg_dev *rkdj = video_drvdata(file);
 	struct rkdjpeg_ctx *ctx =
 		container_of(file->private_data, struct rkdjpeg_ctx, fh);
 
+	mutex_lock(&rkdj->rkdjpeg_mutex);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	v4l2_fh_del(&ctx->fh);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
+	mutex_unlock(&rkdj->rkdjpeg_mutex);
 	/* FIXME: implement this.
 	 *  - end any currently ongoing stream
 	 *  - control handler stuff?
 	 */
-	ret = rkdjpeg_uninit_hw(rkdj);
-	if (ret < 0) {
-		dev_err(rkdj->dev, "failed to uninitialise hardware (%d)\n", ret);
-	};
 
-	rkdjpeg_disable_clocks(rkdj);
-
-	return ret;
+	return 0;
 }
 
 static const struct v4l2_file_operations rkdjpeg_fops = {
@@ -401,9 +395,8 @@ int rkdjpeg_register_video_dev(struct rkdjpeg_dev *rkdj)
 	struct video_device *vfd;
 	int ret;
 
-	vfd = devm_kzalloc(rkdj->dev, sizeof(*vfd), GFP_KERNEL);
+	vfd = video_device_alloc();
 	if (!vfd) {
-		dev_dbg(rkdj->dev, "alive in error path\n");
 		v4l2_err(&rkdj->v4l2_dev, "Failed to allocate video device\n");
 		return -ENOMEM;
 	}
@@ -422,6 +415,8 @@ int rkdjpeg_register_video_dev(struct rkdjpeg_dev *rkdj)
 	ret = video_register_device(vfd, VFL_TYPE_VIDEO, -1);
 	if (ret) {
 		v4l2_err(&rkdj->v4l2_dev, "Failed to register video device\n");
+		video_device_release(vfd);
+		rkdj->vfd = NULL;
 		return ret;
 	}
 
@@ -474,6 +469,69 @@ static const struct regmap_config rkdjpeg_regmap_config = {
 	.writeable_reg = rkdjpeg_writeable_reg,
 };
 
+static int rkdjpeg_remove(struct platform_device *pdev)
+{
+	struct rkdjpeg_dev *rkdj = platform_get_drvdata(pdev);
+	int ret;
+
+	ret = rkdjpeg_uninit_hw(rkdj);
+	pm_runtime_disable(&pdev->dev);
+	video_unregister_device(rkdj->vfd);
+	v4l2_m2m_release(rkdj->m2m_dev);
+	v4l2_device_unregister(&rkdj->v4l2_dev);
+	rkdjpeg_disable_clocks(rkdj);
+
+	return 0;
+}
+
+static __maybe_unused int rkdjpeg_pm_suspend(struct device *dev)
+{
+	struct rkdjpeg_dev *rkdj = dev_get_drvdata(dev);
+
+	rkdjpeg_uninit_hw(rkdj);
+	regcache_mark_dirty(rkdj->regmap);
+	rkdjpeg_disable_clocks(rkdj);
+
+	return 0;
+}
+
+static __maybe_unused int rkdjpeg_pm_resume(struct device *dev)
+{
+	struct rkdjpeg_dev *rkdj = dev_get_drvdata(dev);
+	int ret;
+
+	rkdjpeg_enable_clocks(rkdj);
+	ret = regcache_sync(rkdj->regmap);
+
+	return 0;
+}
+
+static __maybe_unused int rkdjpeg_suspend(struct device *dev)
+{
+	struct rkdjpeg_dev *rkdj = dev_get_drvdata(dev);
+
+	v4l2_m2m_suspend(rkdj->m2m_dev);
+	return pm_runtime_force_suspend(dev);
+}
+
+static __maybe_unused int rkdjpeg_resume(struct device *dev)
+{
+	struct rkdjpeg_dev *rkdj = dev_get_drvdata(dev);
+	int ret;
+
+	ret = pm_runtime_force_resume(dev);
+	if (ret < 0)
+		return ret;
+
+	v4l2_m2m_resume(rkdj->m2m_dev);
+	return ret;
+}
+
+static const struct dev_pm_ops rkdjpeg_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(rkdjpeg_suspend, rkdjpeg_resume)
+	SET_RUNTIME_PM_OPS(rkdjpeg_pm_suspend, rkdjpeg_pm_resume, NULL)
+};
+
 static const struct of_device_id of_rkdjpeg_match[] = {
 	{ .compatible = "rockchip,rk3568-rkdjpeg", .data = &rkdjpeg_rk3568_variant},
 	{ /* sentinel */ }
@@ -487,6 +545,9 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 	struct resource *res;
 	void __iomem *regs;
 	int irq, ret;
+#ifdef DEBUG
+	int prod_num, bit_depth, minor_ver;
+#endif
 
 	rkdj = devm_kzalloc(&pdev->dev, sizeof(*rkdj), GFP_KERNEL);
 	if (!rkdj)
@@ -511,10 +572,10 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 				     "Failed to get clock hclk\n");
 	}
 
-	ret = clk_prepare(rkdj->hclk);
+	ret = clk_prepare_enable(rkdj->hclk);
 	if (ret) {
 		return dev_err_probe(rkdj->dev, ret,
-				     "Failed to prepare clock hclk\n");
+				     "Failed to enable clock hclk\n");
 	}
 
 	rkdj->aclk = devm_clk_get(&pdev->dev, "aclk");
@@ -524,10 +585,10 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		goto err_disable_hclk;
 	}
 
-	ret = clk_prepare(rkdj->aclk);
+	ret = clk_prepare_enable(rkdj->aclk);
 	if (ret) {
 		ret = dev_err_probe(rkdj->dev, ret,
-				    "Failed to prepare clock aclk\n");
+				    "Failed to enable clock aclk\n");
 		goto err_disable_hclk;
 	}
 
@@ -580,17 +641,39 @@ static int rkdjpeg_probe(struct platform_device *pdev)
 		goto err_disable_aclk;
 	}
 
+	rkdj->m2m_dev = v4l2_m2m_init(rkdj->variant->m2m_ops);
+
 	ret = rkdjpeg_register_video_dev(rkdj);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register video device (%d)\n", ret);
 		goto err_unregister_video_dev;
 	}
 
+	ret = rkdjpeg_init_hw(rkdj);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to initialise hardware (%d)\n", ret);
+		goto err_unregister_video_dev;
+	}
+
+#ifdef DEBUG
+	ret = rkdjpeg_get_hw_version(rkdj, &prod_num, &bit_depth, &minor_ver);
+	if (ret < 0) {
+		dev_err(rkdj->dev, "Error getting hw version info: %d\n", ret);
+		rkdjpeg_uninit_hw(rkdj);
+		goto err_unregister_video_dev;
+	}
+	dev_dbg(rkdj->dev, "Initialised version=%#4x minor=%#2x max bit depth=%d\n",
+		prod_num, minor_ver, bit_depth);
+#endif
+
+	pm_runtime_enable(&pdev->dev);
+
 	return 0;
 
 err_unregister_video_dev:
 	video_unregister_device(rkdj->vfd);
 	v4l2_device_unregister(&rkdj->v4l2_dev);
+	video_device_release(rkdj->vfd);
 
 err_disable_aclk:
 	clk_disable_unprepare(rkdj->aclk);
@@ -601,28 +684,13 @@ err_disable_hclk:
 	return ret;
 }
 
-static int rkdjpeg_remove(struct platform_device *pdev)
-{
-	struct rkdjpeg_dev *rkdj = platform_get_drvdata(pdev);
-	int ret;
-
-	video_unregister_device(rkdj->vfd);
-	v4l2_device_unregister(&rkdj->v4l2_dev);
-
-	ret = rkdjpeg_uninit_hw(rkdj);
-
-	clk_disable_unprepare(rkdj->aclk);
-	clk_disable_unprepare(rkdj->hclk);
-
-	return 0;
-}
-
 static struct platform_driver rkdjpeg_driver = {
 	.probe = rkdjpeg_probe,
 	.remove = rkdjpeg_remove,
 	.driver = {
-		   .name = DRIVER_NAME,
-		   .of_match_table = of_match_ptr(of_rkdjpeg_match),
+		.name = DRIVER_NAME,
+		.of_match_table = of_match_ptr(of_rkdjpeg_match),
+		.pm = &rkdjpeg_pm_ops,
 	},
 };
 module_platform_driver(rkdjpeg_driver);

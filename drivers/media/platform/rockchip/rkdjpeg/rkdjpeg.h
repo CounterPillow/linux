@@ -6,6 +6,8 @@
 #include <linux/platform_device.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-mem2mem.h>
+#include <media/videobuf2-core.h>
 
 #define RKDJPEG_FMT_FLAG_OUTPUT		BIT(0)
 #define RKDJPEG_FMT_FLAG_CAPTURE	BIT(1)
@@ -22,6 +24,7 @@
  * @max_width;		maximum image width the hardware can decode
  * @max_height;		maximum image height the hardware can decode
  * @step_size;		decoder supported resolution step size
+ * @m2m_ops;		v4l2 m2m ops
  */
 struct rkdjpeg_variant {
 	const u32 *cap_fmts;
@@ -34,6 +37,7 @@ struct rkdjpeg_variant {
 	const int max_width;
 	const int max_height;
 	const int step_size;
+	const struct v4l2_m2m_ops *m2m_ops;
 };
 
 struct rkdjpeg_dev {
